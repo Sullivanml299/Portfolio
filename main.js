@@ -132,8 +132,9 @@
      - Exactly one video autoplays (muted) at a time: the tile whose center is
        nearest the viewport center, and only while it's actually near center.
      - When a video stops playing, its poster returns.
-     - Clicking a tile (or Enter/Space) opens a modal player ~3x the tile size,
-       playing with sound. (No native fullscreen; the modal works everywhere.)
+     - Clicking a tile (or Enter/Space) expands the video: on phones it opens
+       native fullscreen (a small modal isn't worth it); on larger screens it
+       opens a modal ~3x the tile size. Either way it plays with sound.
      A missing file errors out and simply stays a styled placeholder. */
   function initVideos() {
     var tiles = Array.prototype.slice.call(document.querySelectorAll('[data-vtile]'));
@@ -211,7 +212,7 @@
       var p = modalVideo.play();
       if (p && p.catch) p.catch(function () {});
       var closeBtn = modal.querySelector('.modal__close');
-      if (closeBtn) closeBtn.focus();
+      if (closeBtn) { try { closeBtn.focus({ preventScroll: true }); } catch (e) { closeBtn.focus(); } }
     }
 
     function closeModal() {
@@ -222,7 +223,9 @@
       modal.hidden = true;
       document.body.classList.remove('modal-open');
       modalOpener = null;
-      if (lastFocused && lastFocused.focus) { try { lastFocused.focus(); } catch (e) {} }
+      if (lastFocused && lastFocused.focus) {
+        try { lastFocused.focus({ preventScroll: true }); } catch (e) { try { lastFocused.focus(); } catch (e2) {} }
+      }
       if (!reduceMotion) updateActive();                 // resume background autoplay
     }
 
@@ -241,6 +244,45 @@
       });
     }
 
+    // ---- expand router: native fullscreen on phones, modal on larger screens ----
+    // Phone = either viewport dimension is small (catches portrait & landscape).
+    function isPhone() {
+      return window.matchMedia('(max-width: 540px), (max-height: 540px)').matches;
+    }
+    function expandNative(v) {
+      // Runs synchronously in the click/keydown handler so the user activation
+      // needed by requestFullscreen / webkitEnterFullscreen is preserved.
+      if (current && current !== v) { try { current.pause(); } catch (e) {} }
+      current = v;
+      ensureSrc(v);
+      v.muted = false;
+      v.controls = true;
+      var req = v.requestFullscreen || v.webkitRequestFullscreen || v.webkitEnterFullscreen;
+      if (req) { try { var fp = req.call(v); if (fp && fp.catch) fp.catch(function () {}); } catch (e) {} }
+      var p = v.play();
+      if (p && p.catch) p.catch(function () {});
+    }
+    // After leaving native fullscreen, restore tile state and re-sync autoplay.
+    function syncAfterNativeExit() {
+      if (modal && !modal.hidden) return;   // a modal video's own fullscreen — leave the grid alone
+      tiles.forEach(function (tile) {
+        var vv = tile.querySelector('[data-pvideo]');
+        if (vv) { vv.controls = false; vv.muted = true; }
+      });
+      current = null;                       // clear stale ref so updateActive can re-pick
+      if (!reduceMotion) updateActive();
+    }
+    document.addEventListener('fullscreenchange', function () {
+      if (!document.fullscreenElement) syncAfterNativeExit();
+    });
+    document.addEventListener('webkitfullscreenchange', function () {
+      if (!document.webkitFullscreenElement) syncAfterNativeExit();
+    });
+    function expand(tile, v) {
+      if (isPhone()) expandNative(v);
+      else openModal(tile, v);
+    }
+
     tiles.forEach(function (tile) {
       var v = tile.querySelector('[data-pvideo]');
       if (!v) return;
@@ -254,14 +296,16 @@
       // (scroll-away pause, fullscreen exit, etc.).
       v.addEventListener('playing', function () { tile.classList.add('is-playing'); });
       v.addEventListener('pause', function () { tile.classList.remove('is-playing'); });
+      // iOS native player exit fires this on the <video>, not fullscreenchange.
+      v.addEventListener('webkitendfullscreen', syncAfterNativeExit);
 
       tile.addEventListener('click', function () {
-        if (tile.classList.contains('is-playable')) openModal(tile, v);
+        if (tile.classList.contains('is-playable')) expand(tile, v);
       });
       tile.addEventListener('keydown', function (e) {
         if ((e.key === 'Enter' || e.key === ' ') && tile.classList.contains('is-playable')) {
           e.preventDefault();
-          openModal(tile, v);
+          expand(tile, v);
         }
       });
 
