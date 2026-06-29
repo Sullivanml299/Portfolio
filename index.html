@@ -140,8 +140,9 @@
           </div>
           <div class="project-media" data-vtile>
             <video class="project-video" data-pvideo data-src="videos/onescreen.mp4" muted loop playsinline preload="none"></video>
+            <img class="project-poster" src="images/posters/onescreen.jpg" alt="" aria-hidden="true">
             <span class="project-media-label">WEB · iOS · ANDROID</span>
-            <div class="project-fsbadge" data-fsbadge>⛶ Fullscreen</div>
+            <div class="project-fsbadge" data-fsbadge>⛶ Expand</div>
           </div>
         </article>
 
@@ -169,8 +170,9 @@
           </div>
           <div class="project-media" data-vtile>
             <video class="project-video" data-pvideo data-src="videos/stripped.mp4" muted loop playsinline preload="none"></video>
+            <img class="project-poster" src="images/posters/stripped.jpg" alt="" aria-hidden="true">
             <span class="project-media-label">WINDOWS · WEBGL</span>
-            <div class="project-fsbadge" data-fsbadge>⛶ Fullscreen</div>
+            <div class="project-fsbadge" data-fsbadge>⛶ Expand</div>
           </div>
         </article>
 
@@ -197,8 +199,9 @@
           </div>
           <div class="project-media" data-vtile>
             <video class="project-video" data-pvideo data-src="videos/runtime-classifier.mp4" muted loop playsinline preload="none"></video>
+            <img class="project-poster" src="images/posters/runtime-classifier.jpg" alt="" aria-hidden="true">
             <span class="project-media-label">UNITY · SENTIS</span>
-            <div class="project-fsbadge" data-fsbadge>⛶ Fullscreen</div>
+            <div class="project-fsbadge" data-fsbadge>⛶ Expand</div>
           </div>
         </article>
 
@@ -223,9 +226,10 @@
             </div>
           </div>
           <div class="project-media" data-vtile>
-            <video class="project-video" data-pvideo data-src="videos/journal-system.mp4" muted loop playsinline preload="none"></video>
+            <video class="project-video" data-pvideo data-src="videos/journal.mp4" muted loop playsinline preload="none"></video>
+            <img class="project-poster" src="images/posters/journal.jpg" alt="" aria-hidden="true">
             <span class="project-media-label">UNITY · SHADERS</span>
-            <div class="project-fsbadge" data-fsbadge>⛶ Fullscreen</div>
+            <div class="project-fsbadge" data-fsbadge>⛶ Expand</div>
           </div>
         </article>
 
@@ -320,6 +324,15 @@
     </footer>
 
   </main>
+
+  <!-- Expanded video player (opened from a project tile) -->
+  <div class="modal" id="player-modal" hidden>
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__dialog" role="dialog" aria-modal="true" aria-label="Project demo video">
+      <button class="modal__close" type="button" data-modal-close aria-label="Close expanded view">✕</button>
+      <video class="modal__video" controls loop playsinline></video>
+    </div>
+  </div>
 </div>
 
 <script src="main.js" defer></script>

@@ -126,16 +126,31 @@
     }
   }
 
-  /* Project video tiles: lazy-load on first view, autoplay (muted) while
-     in view, and click/keyboard to open fullscreen with sound + controls.
-     Tiles only become interactive once their video has real data, so a
-     missing file simply stays a styled placeholder. */
+  /* Project video tiles. Behavior:
+     - Each tile shows a screen-grab poster; metadata is loaded for every tile
+       up front so any tile can be opened in the larger "Expand" player.
+     - Exactly one video autoplays (muted) at a time: the tile whose center is
+       nearest the viewport center, and only while it's actually near center.
+     - When a video stops playing, its poster returns.
+     - Clicking a tile (or Enter/Space) opens a modal player ~3x the tile size,
+       playing with sound. (No native fullscreen; the modal works everywhere.)
+     A missing file errors out and simply stays a styled placeholder. */
   function initVideos() {
-    var tiles = document.querySelectorAll('[data-vtile]');
+    var tiles = Array.prototype.slice.call(document.querySelectorAll('[data-vtile]'));
     if (!tiles.length) return;
+
+    // A tile autoplays when its center is within this fraction of the viewport
+    // height from the viewport's center (i.e. the middle ~70% band).
+    var ACTIVE_BAND = 0.35;
+    var EXPAND_SCALE = 3;   // expanded modal target size vs. the tile
 
     function ensureSrc(v) {
       if (!v.getAttribute('src') && v.dataset.src) v.setAttribute('src', v.dataset.src);
+    }
+    function projectName(tile) {
+      var art = tile.closest('.project');
+      var h = art && art.querySelector('.project-name');
+      return h ? h.textContent.trim() : 'project';
     }
 
     function makePlayable(tile, v) {
@@ -143,90 +158,159 @@
       tile.classList.add('is-playable');
       tile.setAttribute('role', 'button');
       tile.setAttribute('tabindex', '0');
-      var label = tile.querySelector('.project-media-label');
-      tile.setAttribute('aria-label',
-        'Play ' + (label ? label.textContent.trim() + ' ' : '') + 'demo video fullscreen');
+      tile.setAttribute('aria-label', 'Expand ' + projectName(tile) + ' demo video');
     }
 
-    function toggleFullscreen(v) {
-      if (document.fullscreenElement || document.webkitFullscreenElement) {
-        (document.exitFullscreen || document.webkitExitFullscreen || function () {}).call(document);
-        return;
-      }
+    // Centralized playback so there is always at most one active video,
+    // whether triggered by scrolling or by a fullscreen click.
+    var current = null;
+    function playOnly(v) {
+      if (current && current !== v) { try { current.pause(); } catch (e) {} }
+      current = v;
       ensureSrc(v);
-      v.muted = false;
-      v.controls = true;
-      var req = v.requestFullscreen || v.webkitRequestFullscreen || v.webkitEnterFullscreen;
-      if (req) { try { req.call(v); } catch (e) {} }
+      try { v.preload = 'auto'; } catch (e) {}
       var p = v.play();
       if (p && p.catch) p.catch(function () {});
     }
+    function pauseCurrent() {
+      if (current) { try { current.pause(); } catch (e) {} current = null; }
+    }
 
-    Array.prototype.forEach.call(tiles, function (tile) {
+    // ---- expand modal (larger in-page player; no native fullscreen) ----
+    var modal = document.getElementById('player-modal');
+    var modalDialog = modal && modal.querySelector('.modal__dialog');
+    var modalVideo = modal && modal.querySelector('.modal__video');
+    var modalOpener = null;
+    var lastFocused = null;
+
+    function sizeModal(tile) {
+      if (!modalDialog) return;
+      var tileW = tile.getBoundingClientRect().width;
+      var w = Math.min(tileW * EXPAND_SCALE, window.innerWidth * 0.92);
+      var h = w * 9 / 16;
+      var maxH = window.innerHeight * 0.86;
+      if (h > maxH) { h = maxH; w = h * 16 / 9; }
+      modalDialog.style.width = Math.round(w) + 'px';
+      modalDialog.style.height = Math.round(h) + 'px';
+    }
+
+    function openModal(tile, v) {
+      if (!modal || !modalVideo) return;
+      modalOpener = tile;
+      lastFocused = document.activeElement;
+      pauseCurrent();                                   // stop background autoplay
+      var poster = tile.querySelector('.project-poster');
+      if (poster) modalVideo.poster = poster.getAttribute('src') || '';
+      if (modalDialog) modalDialog.setAttribute('aria-label', projectName(tile) + ' — demo video');
+      modalVideo.src = v.getAttribute('src') || v.dataset.src || '';
+      sizeModal(tile);
+      modal.hidden = false;
+      document.body.classList.add('modal-open');
+      modalVideo.muted = false;
+      try { modalVideo.currentTime = 0; } catch (e) {}
+      var p = modalVideo.play();
+      if (p && p.catch) p.catch(function () {});
+      var closeBtn = modal.querySelector('.modal__close');
+      if (closeBtn) closeBtn.focus();
+    }
+
+    function closeModal() {
+      if (!modal || modal.hidden) return;
+      try { modalVideo.pause(); } catch (e) {}
+      modalVideo.removeAttribute('src');
+      try { modalVideo.load(); } catch (e) {}            // stop buffering
+      modal.hidden = true;
+      document.body.classList.remove('modal-open');
+      modalOpener = null;
+      if (lastFocused && lastFocused.focus) { try { lastFocused.focus(); } catch (e) {} }
+      if (!reduceMotion) updateActive();                 // resume background autoplay
+    }
+
+    if (modal) {
+      modal.addEventListener('click', function (e) {
+        if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-modal-close')) closeModal();
+      });
+      modal.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { closeModal(); return; }
+        if (e.key !== 'Tab') return;
+        var f = modal.querySelectorAll('button, video, [href], [tabindex]:not([tabindex="-1"])');
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      });
+    }
+
+    tiles.forEach(function (tile) {
       var v = tile.querySelector('[data-pvideo]');
       if (!v) return;
 
-      v.addEventListener('loadeddata', function () { v.style.opacity = '1'; makePlayable(tile, v); });
-      v.addEventListener('error', function () { v.style.opacity = '0'; });
-      // iOS native player exit (webkitEnterFullscreen) doesn't fire fullscreenchange.
-      v.addEventListener('webkitendfullscreen', function () { v.controls = false; v.muted = true; });
+      // Interactive once metadata resolves (a missing file errors instead and
+      // stays a non-interactive placeholder).
+      v.addEventListener('loadedmetadata', function () { makePlayable(tile, v); });
+      v.addEventListener('loadeddata', function () { makePlayable(tile, v); });
+      // Hide the poster only while actually playing; show it the moment playback
+      // stops. Driven by the element's own events so it always tracks real state
+      // (scroll-away pause, fullscreen exit, etc.).
+      v.addEventListener('playing', function () { tile.classList.add('is-playing'); });
+      v.addEventListener('pause', function () { tile.classList.remove('is-playing'); });
 
       tile.addEventListener('click', function () {
-        if (!tile.classList.contains('is-playable')) return;
-        toggleFullscreen(v);
+        if (tile.classList.contains('is-playable')) openModal(tile, v);
       });
       tile.addEventListener('keydown', function (e) {
         if ((e.key === 'Enter' || e.key === ' ') && tile.classList.contains('is-playable')) {
           e.preventDefault();
-          toggleFullscreen(v);
+          openModal(tile, v);
         }
       });
+
+      // Load metadata so every tile is openable regardless of which one is
+      // autoplaying. Metadata is small; the active video upgrades to a full
+      // load via playOnly().
+      try { v.preload = 'metadata'; } catch (e) {}
+      ensureSrc(v);
+      try { v.load(); } catch (e) {}
     });
 
-    function resetTiles() {
-      Array.prototype.forEach.call(tiles, function (tile) {
-        var v = tile.querySelector('[data-pvideo]');
-        if (v) { v.controls = false; v.muted = true; }
-      });
-    }
-    document.addEventListener('fullscreenchange', function () {
-      if (!document.fullscreenElement) resetTiles();
-    });
-    document.addEventListener('webkitfullscreenchange', function () {
-      if (!document.webkitFullscreenElement) resetTiles();
-    });
-
-    if ('IntersectionObserver' in window && !reduceMotion) {
-      var io = new IntersectionObserver(function (entries) {
-        entries.forEach(function (en) {
-          var v = en.target;
-          if (en.isIntersecting) {
-            ensureSrc(v);
-            var p = v.play();
-            if (p && p.catch) p.catch(function () {});
-          } else {
-            try { v.pause(); } catch (e) {}
-          }
-        });
-      }, { threshold: 0.55 });
-      Array.prototype.forEach.call(tiles, function (tile) {
-        var v = tile.querySelector('[data-pvideo]');
-        if (v) io.observe(v);
-      });
-    } else {
-      // No IntersectionObserver (or reduced motion): we never autoplay, but a
-      // tile with real media must still become interactive. preload="none" +
-      // ensureSrc alone never fires 'loadeddata', so bump preload and kick a
-      // load so makePlayable runs (the 'error' handler keeps missing files as
-      // placeholders, and the fade-in still waits on real frame data).
-      Array.prototype.forEach.call(tiles, function (tile) {
+    // Play the tile nearest the viewport center (if it's actually near center);
+    // pause everything else. Suspended while the expand modal is open.
+    function updateActive() {
+      if (modal && !modal.hidden) return;
+      var centerY = window.innerHeight / 2;
+      var best = null, bestDist = Infinity;
+      tiles.forEach(function (tile) {
         var v = tile.querySelector('[data-pvideo]');
         if (!v) return;
-        v.preload = 'metadata';
-        ensureSrc(v);
-        v.load();
+        var rect = tile.getBoundingClientRect();
+        if (rect.bottom <= 0 || rect.top >= window.innerHeight) return; // off-screen
+        var dist = Math.abs((rect.top + rect.height / 2) - centerY);
+        if (dist < bestDist) { bestDist = dist; best = v; }
       });
+      if (best && bestDist <= window.innerHeight * ACTIVE_BAND) {
+        if (best !== current) playOnly(best);
+      } else {
+        pauseCurrent();
+      }
     }
+
+    // Throttle scroll work to one update per frame; fall back to a direct call
+    // where requestAnimationFrame is unavailable.
+    var scheduled = false;
+    function onScroll() {
+      if (scheduled) return;
+      scheduled = true;
+      var run = function () { scheduled = false; updateActive(); };
+      if (window.requestAnimationFrame) requestAnimationFrame(run); else run();
+    }
+    if (!reduceMotion) {
+      window.addEventListener('scroll', onScroll, { passive: true });
+      updateActive();
+    }
+    window.addEventListener('resize', function () {
+      if (modal && !modal.hidden && modalOpener) sizeModal(modalOpener);
+      else if (!reduceMotion) onScroll();
+    }, { passive: true });
   }
 
   /* Lazy-load the hero profile photo; fade in on load, stay hidden on error. */
